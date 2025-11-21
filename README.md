@@ -1,9 +1,3 @@
-[INFO]
-Übersetzung der kompletten Datei ins Englische. Inhalt unverändert, nur Sprache konvertiert.
-
----
-
-## ENGLISH TRANSLATION
 
 # 🎮 Pokemon Red RL Agent
 
