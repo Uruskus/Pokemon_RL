@@ -1,0 +1,30 @@
+# ROM Dateien (NICHT hochladen!)
+*.gb
+*.gbc
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+
+# Trainierte Models (zu groß für Git)
+models/
+*.zip
+
+# Logs
+logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# System
+.DS_Store
+Thumbs.db
