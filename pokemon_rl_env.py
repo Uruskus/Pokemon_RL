@@ -61,7 +61,6 @@ class PokemonRedEnv(gym.Env):
             'money': 0xD347  # 3 Bytes BCD
         }
 
-        # Previous state für Reward Calculation
         self.prev_state = {
             'position': (0, 0),
             'map_id': 0,
@@ -139,7 +138,7 @@ class PokemonRedEnv(gym.Env):
 
         # Reward für neues Pokemon
         if party_count > self.prev_state['party_count']:
-            reward += 20.0
+            reward += 40.0
             self.stats['total_battles_won'] += 1
 
         # Reward für Badge
@@ -148,7 +147,7 @@ class PokemonRedEnv(gym.Env):
 
         # Penalty für Stillstand
         if (x, y) == self.prev_state['position'] and map_id == self.prev_state['map_id']:
-            reward -= 0.1  # Stärkere Penalty
+            reward -= 0.2  # Stärkere Penalty
 
         # Update previous state
         self.prev_state = {
@@ -166,47 +165,40 @@ class PokemonRedEnv(gym.Env):
 
         # Reset Emulator (lädt ROM neu)
         self.pyboy.stop()
-        window_type = "SDL2" if self.render_mode == "human" else "null"
-        self.pyboy = PyBoy(self.rom_path, window=window_type)
+        self.pyboy = PyBoy(self.rom_path, window="SDL2")
         self.pyboy.set_emulation_speed(0)
 
-        # ===== INTRO ÜBERSPRINGEN =====
-        print("Überspringe Intro...")
+        print("Überspringe Intro.")
 
-        # Phase 1: Title Screen überspringen (Start drücken)
+        # Phase 1: Title Screen überspringen
         for _ in range(5):
             self.pyboy.button_press('start')
-            for _ in range(30):
-                self.pyboy.tick()
+            for _ in range(30): self.pyboy.tick()
             self.pyboy.button_release('start')
-            for _ in range(30):
-                self.pyboy.tick()
+            for _ in range(30): self.pyboy.tick()
 
-        # Phase 2: Intro-Sequenz und Dialoge überspringen (A spammen)
+        # Phase 2: A spammen
         for _ in range(100):
             self.pyboy.button_press('a')
-            for _ in range(10):
-                self.pyboy.tick()
+            for _ in range(10): self.pyboy.tick()
             self.pyboy.button_release('a')
-            for _ in range(10):
-                self.pyboy.tick()
+            for _ in range(10): self.pyboy.tick()
 
-        # Phase 3: Warten bis Spiel wirklich startet
+        # Phase 3: warten
         for _ in range(1000):
             self.pyboy.tick()
 
         print("Intro übersprungen! Spiel läuft.")
-        # ===== ENDE INTRO SKIP =====
 
-        # Stats Update
         self.stats['total_episodes'] += 1
         self.stats['current_episode_steps'] = 0
         self.stats['current_episode_start'] = datetime.now()
 
         observation = self._get_screen()
         info = {}
-
         return observation, info
+
+
 
     def step(self, action):
         """Führt eine Aktion aus"""
@@ -228,7 +220,7 @@ class PokemonRedEnv(gym.Env):
             self.pyboy.button_press(button_map[action])
 
         # Emulation für einige Frames
-        for _ in range(8):  # 8 Frames pro Aktion
+        for _ in range(4):
             self.pyboy.tick()
 
         # Button loslassen
@@ -243,15 +235,37 @@ class PokemonRedEnv(gym.Env):
         observation = self._get_screen()
         reward = self._calculate_reward()
         self.stats['last_reward'] = reward
+        battle_type = self._read_ram(self.RAM_ADDRESSES['battle_type'])
+
+        # Bonus wenn ein Kampf startet
+        if battle_type > 0 and self.prev_state.get("battle_type", 0) == 0:
+            reward += 10
+
 
         # Update Pokemon Party
         self.stats['pokemon_party'] = self._get_pokemon_party()
 
-        # Update Position & Badges
+        # RAM auslesen
         x = self._read_ram(self.RAM_ADDRESSES['player_x'])
         y = self._read_ram(self.RAM_ADDRESSES['player_y'])
+        map_id = self._read_ram(self.RAM_ADDRESSES['map_id'])
+        badges = self._read_ram(self.RAM_ADDRESSES['badges'])
+
+        # Haus verlassen Reward
+        START_HOUSE_MAP_ID = 0x02
+        if self.prev_state['map_id'] == START_HOUSE_MAP_ID and map_id != START_HOUSE_MAP_ID:
+            reward += 20.0
+
+        # Exploration Reward
+        if not hasattr(self, 'visited_positions'):
+            self.visited_positions = set()
+        if (x, y) not in self.visited_positions:
+            reward += 0.5
+            self.visited_positions.add((x, y))
+
+        # Update Stats
         self.stats['player_position'] = (x, y)
-        self.stats['badges'] = self._read_ram(self.RAM_ADDRESSES['badges'])
+        self.stats['badges'] = badges
 
         # Episode beenden nach X Steps (oder andere Bedingung)
         done = self.stats['current_episode_steps'] >= 10000

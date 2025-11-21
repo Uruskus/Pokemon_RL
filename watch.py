@@ -1,4 +1,4 @@
-from pokemon_env import PokemonRedEnv
+from pokemon_rl_env import PokemonRedEnv
 from stable_baselines3 import PPO
 import time
 
