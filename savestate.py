@@ -44,9 +44,9 @@ class PokemonRedEnv(gym.Env):
         self.action_space = spaces.Discrete(9)
 
         # Observation Space: Grayscale Game Boy Screen (144x160)
-        self.observation_space = gym.spaces.Box(
+        self.observation_space = spaces.Box(
             low=0, high=255,
-            shape=(144, 160, 2),
+            shape=(144, 160, 1),
             dtype=np.uint8
         )
 
@@ -73,60 +73,7 @@ class PokemonRedEnv(gym.Env):
             'battle_type': 0xD057,
             'party_count': 0xD163,
             'badges': 0xD356,
-            'money': 0xD347,  # 3 Bytes BCD
-            'num_bag_items': 0xD31D,
-            'bag_items': 0xD31E,
-            # Pokemon Party
-            'party_species': 0xD164,
-            'party_level_1': 0xD18C,
-            'party_level_2': 0xD1B8,
-            'party_level_3': 0xD1E4,
-            'party_level_4': 0xD210,
-            'party_level_5': 0xD23C,
-            'party_level_6': 0xD268,
-            # Pokedex
-            'pokedex_owned': 0xD2F7,
-            'pokedex_seen': 0xD30A,
-            # Events (wichtige Story-Flags)
-            'event_flags': 0xD747,  # Event-Bitfeld
-            # HMs und Field Moves
-            'hm_flags': 0xD803,  # Welche HMs wurden benutzt
-        }
-
-        # Wichtige Map IDs (für Boosting)
-        self.IMPORTANT_MAP_IDS = {
-            # Gyms
-            54: {'name': 'Pewter Gym', 'boost': 2.0, 'condition': lambda self: self._read_ram(self.RAM_ADDRESSES['badges']) < 1},
-            59: {'name': 'Cerulean Gym', 'boost': 2.0, 'condition': lambda self: self._read_ram(self.RAM_ADDRESSES['badges']) < 2},
-            192: {'name': 'Vermillion Gym', 'boost': 2.0, 'condition': lambda self: self._read_ram(self.RAM_ADDRESSES['badges']) < 3},
-            183: {'name': 'Celadon Gym', 'boost': 2.0, 'condition': lambda self: self._read_ram(self.RAM_ADDRESSES['badges']) < 4},
-            182: {'name': 'Fuchsia Gym', 'boost': 2.0, 'condition': lambda self: self._read_ram(self.RAM_ADDRESSES['badges']) < 5},
-            214: {'name': 'Saffron Gym', 'boost': 2.0, 'condition': lambda self: self._read_ram(self.RAM_ADDRESSES['badges']) < 6},
-            165: {'name': 'Cinnabar Gym', 'boost': 2.0, 'condition': lambda self: self._read_ram(self.RAM_ADDRESSES['badges']) < 7},
-            45: {'name': 'Viridian Gym', 'boost': 2.0, 'condition': lambda self: self._read_ram(self.RAM_ADDRESSES['badges']) < 8},
-            # Wichtige Story-Orte
-            199: {'name': 'Rocket Hideout', 'boost': 1.5, 'condition': lambda self: True},
-            181: {'name': 'Silph Co', 'boost': 1.5, 'condition': lambda self: True},
-            142: {'name': 'Pokemon Tower', 'boost': 1.5, 'condition': lambda self: True},
-            # Safari Zone
-            217: {'name': 'Safari Zone', 'boost': 2.0, 'condition': lambda self: True},
-        }
-
-        # Reward Konfiguration (basierend auf PokeRL)
-        self.reward_config = {
-            'exploration': 0.02,          # Pro neue 8x8 Zone
-            'exploration_boost': 0.04,    # Für wichtige Map IDs
-            'new_map': 5.0,               # Neue Map ID
-            'seen_pokemon': 1.0,          # Neues Pokemon gesehen
-            'caught_pokemon': 10.0,       # Pokemon gefangen
-            'badges': 100.0,              # Badge erhalten
-            'level': 1.0,                 # Level-ups (mit Formel)
-            'battle_start': 5.0,          # Kampf beginnt
-            'item': 2.0,                  # Item erhalten
-            'heal': 5.0,                  # Pokemon Center geheilt
-            'event': 20.0,                # Story-Event abgeschlossen
-            'hm_use': 10.0,               # HM benutzt (Cut, Surf, etc)
-            'stillstand_penalty': -0.5,   # Stärkere Penalty
+            'money': 0xD347  # 3 Bytes BCD
         }
 
         # Previous state für Reward Calculation
@@ -134,59 +81,19 @@ class PokemonRedEnv(gym.Env):
             'position': (0, 0),
             'map_id': 0,
             'party_count': 0,
-            'badges': 0,
-            'battle_type': 0,
-            'money': 0,
-            'party_levels': [0, 0, 0, 0, 0, 0],
-            'pokedex_seen': set(),
-            'pokedex_owned': set(),
-            'num_items': 0,
-            'event_count': 0,
-            'hm_flags': 0,
+            'badges': 0
         }
-
-        # Visited zones für Exploration-Bonus (per Episode)
-        self._visited_zones = set()
-
-        # Global visited mask (über alle Episodes)
-        self._global_visited_map = {}  # {map_id: set of (x, y)}
-
-        # Stats für Tracking
-        self.total_pokemon_seen = 0
-        self.total_pokemon_caught = 0
-        self.total_events_completed = 0
 
         # Stats Window
         self.stats_window = None
         self.stats_thread = None
 
     def _get_screen(self):
-        """
-        Holt den aktuellen Bildschirm als NumPy Array mit 2 Channels:
-        - Channel 1: Grayscale Screen
-        - Channel 2: Visited Mask (zeigt wo KI schon war)
-        """
-        # Channel 1: Normaler Bildschirm
-        screen = self.pyboy.screen.image
+        """Holt den aktuellen Bildschirm als NumPy Array"""
+        screen = self.pyboy.screen.image  # FIXED: screen.image statt screen_image()
         screen = np.array(screen)
         screen = cv2.cvtColor(screen, cv2.COLOR_RGB2GRAY)
-
-        # Channel 2: Visited Mask erstellen
-        map_id = self._read_ram(self.RAM_ADDRESSES['map_id'])
-        visited_mask = np.zeros((144, 160), dtype=np.uint8)
-
-        # Markiere besuchte Bereiche auf aktueller Map
-        if map_id in self._global_visited_map:
-            for (vx, vy) in self._global_visited_map[map_id]:
-                # Zeichne 8x8 Block für besuchte Tile
-                x_start = vx * 8
-                y_start = vy * 8
-                x_end = min(x_start + 8, 160)
-                y_end = min(y_start + 8, 144)
-                visited_mask[y_start:y_end, x_start:x_end] = 255
-
-        # Kombiniere beide Channels
-        screen = np.stack([screen, visited_mask], axis=-1)
+        screen = np.expand_dims(screen, axis=-1)
         return screen
 
     def _read_ram(self, address):
@@ -197,71 +104,6 @@ class PokemonRedEnv(gym.Env):
         """Liest ein spezifisches Bit aus einer RAM-Adresse"""
         value = self._read_ram(address)
         return (value >> bit) & 1
-
-    def _count_events_completed(self):
-        """Zählt abgeschlossene Story-Events (vereinfacht)"""
-        # Event Flags sind Bitfelder - jedes Bit = ein Event
-        # Für Pokemon Red gibt es ~80 required events
-        event_count = 0
-        for i in range(32):  # Erste 32 Bytes der Event Flags
-            byte_val = self._read_ram(self.RAM_ADDRESSES['event_flags'] + i)
-            # Zähle gesetzte Bits
-            event_count += bin(byte_val).count('1')
-        return event_count
-
-    def _get_hm_usage_count(self):
-        """Zählt wie oft HMs benutzt wurden"""
-        hm_flags = self._read_ram(self.RAM_ADDRESSES['hm_flags'])
-        return bin(hm_flags).count('1')
-
-    def _get_party_levels(self):
-        """Liest alle Party Pokemon Level"""
-        levels = []
-        party_count = self._read_ram(self.RAM_ADDRESSES['party_count'])
-        level_addrs = [
-            self.RAM_ADDRESSES['party_level_1'],
-            self.RAM_ADDRESSES['party_level_2'],
-            self.RAM_ADDRESSES['party_level_3'],
-            self.RAM_ADDRESSES['party_level_4'],
-            self.RAM_ADDRESSES['party_level_5'],
-            self.RAM_ADDRESSES['party_level_6'],
-        ]
-        for i in range(min(party_count, 6)):
-            levels.append(self._read_ram(level_addrs[i]))
-        while len(levels) < 6:
-            levels.append(0)
-        return levels
-
-    def _get_pokedex_stats(self):
-        """Liest Pokedex Seen und Owned"""
-        seen = set()
-        owned = set()
-
-        # Pokedex ist bitfield - 151 Pokemon
-        for i in range(19):  # 19 Bytes für 151 Pokemon
-            seen_byte = self._read_ram(self.RAM_ADDRESSES['pokedex_seen'] + i)
-            owned_byte = self._read_ram(self.RAM_ADDRESSES['pokedex_owned'] + i)
-
-            for bit in range(8):
-                if seen_byte & (1 << bit):
-                    seen.add(i * 8 + bit)
-                if owned_byte & (1 << bit):
-                    owned.add(i * 8 + bit)
-
-        return seen, owned
-
-    def _calculate_level_reward(self, levels):
-        """
-        Level Reward Formel aus PokeRL:
-        - Early game: Summe aller Level
-        - Late game: Reduced scaling um Exploration zu fördern
-        """
-        total_level = sum(levels)
-
-        if total_level < 15:
-            return total_level
-        else:
-            return 30 + (total_level - 15) / 4.0
 
     def _get_pokemon_party(self):
         """Liest Pokemon Party aus RAM"""
@@ -332,26 +174,6 @@ class PokemonRedEnv(gym.Env):
         }
 
         return reward
-
-    def _skip_intro(self):
-        """Helper-Funktion: Überspringt das Intro"""
-        # Phase 1: Title Screen überspringen
-        for _ in range(5):
-            self.pyboy.button_press('start')
-            for _ in range(30): self.pyboy.tick()
-            self.pyboy.button_release('start')
-            for _ in range(30): self.pyboy.tick()
-
-        # Phase 2: A spammen
-        for _ in range(100):
-            self.pyboy.button_press('a')
-            for _ in range(10): self.pyboy.tick()
-            self.pyboy.button_release('a')
-            for _ in range(10): self.pyboy.tick()
-
-        # Phase 3: warten
-        for _ in range(1000):
-            self.pyboy.tick()
 
     def reset(self, seed=None, options=None):
         """Startet eine neue Episode"""

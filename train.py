@@ -12,8 +12,29 @@ os.makedirs("logs", exist_ok=True)
 print("=" * 50)
 print("POKEMON RL TRAINING")
 print("=" * 50)
+
+# Savestate Konfiguration
+SAVESTATE_NAME = "route1" # Setze z.B. "start" um Savestate zu nutzen
+# SAVESTATE_NAME = "start"  # Aktiviere diese Zeile um Savestate zu nutzen
+
+if SAVESTATE_NAME:
+    savestate_path = f"savestates/{SAVESTATE_NAME}.state"
+    if os.path.exists(savestate_path):
+        print(f"\n✓ Nutze Savestate: {savestate_path}")
+    else:
+        print(f"\n⚠️  Savestate nicht gefunden: {savestate_path}")
+        print("   Erstelle zuerst einen mit: python create_savestate.py")
+        savestate_path = None
+else:
+    savestate_path = None
+    print("\n📝 Kein Savestate aktiviert (startet vom Spielanfang)")
+
 print("\nErstelle Pokemon Environment...")
-env = PokemonRedEnv(rom_path="pokemon_red.gb", render_mode=None)  # Kein Fenster für schnelleres Training
+env = PokemonRedEnv(
+    rom_path="pokemon_red.gb",
+    render_mode="human",
+    savestate_path=savestate_path
+)
 print("✓ Environment erstellt (Training läuft ohne GUI für maximale Performance)")
 
 # Prüfe ob bereits ein Model existiert
@@ -36,7 +57,7 @@ else:
         gamma=0.99,
         gae_lambda=0.95,
         clip_range=0.2,
-        tensorboard_log="./logs/"
+        tensorboard_log=None  # Kein Tensorboard - einfacheres Setup
     )
 
 # Callbacks für automatisches Speichern
@@ -64,40 +85,40 @@ try:
     total_steps = 10_000_000
     steps_per_iteration = 1_000_000
     iterations = total_steps // steps_per_iteration
-    
+
     print(f"\n🚀 Starte Training mit {total_steps:,} Steps...\n")
-    
+
     for i in range(iterations):
         print(f"\n{'='*50}")
         print(f"ITERATION {i+1}/{iterations}")
         print(f"Progress: {(i/iterations)*100:.1f}% | Steps: {i*steps_per_iteration:,}/{total_steps:,}")
         print(f"{'='*50}\n")
-        
+
         # Training für diese Iteration
         model.learn(
             total_timesteps=steps_per_iteration,
             callback=checkpoint_callback,
             reset_num_timesteps=False  # Wichtig: Zähler nicht zurücksetzen!
         )
-        
+
         # Speichere nach jeder Iteration
         iteration_model_path = f"models/pokemon_model_{(i+1)}m_steps.zip"
         model.save(iteration_model_path)
         model.save("models/pokemon_model_latest.zip")  # Überschreibe "latest"
-        
+
         print(f"\n✓ Checkpoint gespeichert: {iteration_model_path}")
         print(f"✓ Latest Model aktualisiert")
-        
+
         # Zeige Fortschritt
         completion = ((i+1) / iterations) * 100
         print(f"\n📊 Training {completion:.1f}% abgeschlossen!")
         print(f"   {(i+1)*steps_per_iteration:,} / {total_steps:,} Steps")
-    
+
     # Training abgeschlossen
     print("\n" + "=" * 50)
     print("🎉 TRAINING ABGESCHLOSSEN!")
     print("=" * 50)
-    
+
     # Finales Model speichern
     final_model_path = "models/pokemon_model_final_10m.zip"
     model.save(final_model_path)
@@ -109,12 +130,12 @@ except KeyboardInterrupt:
     print("\n\n" + "=" * 50)
     print("⏸️  TRAINING UNTERBROCHEN!")
     print("=" * 50)
-    
+
     # Speichere aktuellen Stand
     backup_path = "models/pokemon_model_backup.zip"
     model.save(backup_path)
     model.save("models/pokemon_model_latest.zip")
-    
+
     print(f"\n✓ Backup gespeichert: {backup_path}")
     print(f"✓ Latest Model aktualisiert")
     print("\n💡 Starte 'python train.py' erneut um fortzusetzen!")
@@ -124,7 +145,7 @@ except Exception as e:
     print(f"\n❌ FEHLER beim Training: {e}")
     import traceback
     traceback.print_exc()
-    
+
     # Speichere trotzdem
     try:
         error_path = "models/pokemon_model_error_backup.zip"
