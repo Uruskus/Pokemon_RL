@@ -44,9 +44,9 @@ class PokemonRedEnv(gym.Env):
         self.action_space = spaces.Discrete(9)
 
         # Observation Space: Grayscale Game Boy Screen (144x160)
-        self.observation_space = gym.spaces.Box(
+        self.observation_space = spaces.Box(
             low=0, high=255,
-            shape=(144, 160, 2),
+            shape=(144, 160, 1),
             dtype=np.uint8
         )
 
@@ -112,21 +112,26 @@ class PokemonRedEnv(gym.Env):
             217: {'name': 'Safari Zone', 'boost': 2.0, 'condition': lambda self: True},
         }
 
-        # Reward Konfiguration (basierend auf PokeRL)
+        # Reward Konfiguration (OPTIMIERT gegen Kreisen)
         self.reward_config = {
-            'exploration': 0.02,          # Pro neue 8x8 Zone
-            'exploration_boost': 0.04,    # Für wichtige Map IDs
-            'new_map': 5.0,               # Neue Map ID
-            'seen_pokemon': 1.0,          # Neues Pokemon gesehen
-            'caught_pokemon': 10.0,       # Pokemon gefangen
-            'badges': 100.0,              # Badge erhalten
-            'level': 1.0,                 # Level-ups (mit Formel)
-            'battle_start': 5.0,          # Kampf beginnt
-            'item': 2.0,                  # Item erhalten
-            'heal': 5.0,                  # Pokemon Center geheilt
-            'event': 20.0,                # Story-Event abgeschlossen
-            'hm_use': 10.0,               # HM benutzt (Cut, Surf, etc)
-            'stillstand_penalty': -0.5,   # Stärkere Penalty
+            'exploration': 0.005,         # REDUZIERT! Sonst läuft KI nur im Kreis
+            'exploration_boost': 0.01,    # Boost für wichtige Maps
+            'new_map': 10.0,              # ERHÖHT - Neue Maps sind wichtig!
+            'seen_pokemon': 2.0,          # ERHÖHT - Pokemon sehen ist gut
+            'caught_pokemon': 50.0,       # MASSIV ERHÖHT - Das ist das Hauptziel!
+            'badges': 500.0,              # MASSIV ERHÖHT - Badges sind kritisch!
+            'level': 0.5,                 # REDUZIERT - Nicht nur grinden
+            'battle_start': 3.0,          # Leicht reduziert
+            'battle_won': 15.0,           # NEU - Kämpfe gewinnen!
+            'item': 5.0,                  # ERHÖHT - Items sind wichtig
+            'heal': 10.0,                 # Pokemon Center benutzen
+            'event': 30.0,                # ERHÖHT - Story-Events wichtig
+            'hm_use': 20.0,               # ERHÖHT - HMs sind kritisch für Progress
+            'talked_to_npc': 1.0,         # NEU - Mit NPCs reden
+            'menu_opened': 0.5,           # NEU - Menüs öffnen lernen
+            'stillstand_penalty': -1.0,   # ERHÖHT - Stillstand ist schlecht
+            'revisit_penalty': -0.1,      # NEU - Zu oft gleiche Zone
+            'time_penalty': -0.001,       # NEU - Zeit-Druck
         }
 
         # Previous state für Reward Calculation
@@ -143,10 +148,13 @@ class PokemonRedEnv(gym.Env):
             'num_items': 0,
             'event_count': 0,
             'hm_flags': 0,
+            'in_battle': False,
+            'battle_outcome': 0,
         }
 
         # Visited zones für Exploration-Bonus (per Episode)
         self._visited_zones = set()
+        self._zone_visit_count = {}  # Wie oft jede Zone besucht wurde
 
         # Global visited mask (über alle Episodes)
         self._global_visited_map = {}  # {map_id: set of (x, y)}
@@ -155,6 +163,7 @@ class PokemonRedEnv(gym.Env):
         self.total_pokemon_seen = 0
         self.total_pokemon_caught = 0
         self.total_events_completed = 0
+        self.episode_step_count = 0  # Für Time-Penalty
 
         # Stats Window
         self.stats_window = None
@@ -446,8 +455,14 @@ class PokemonRedEnv(gym.Env):
         self.stats['player_position'] = (x, y)
         self.stats['badges'] = self._read_ram(self.RAM_ADDRESSES['badges'])
 
-        # Episode beenden nach X Steps (oder andere Bedingung)
-        done = self.stats['current_episode_steps'] >= 10000
+        # Episode beenden - DYNAMISCHE LÄNGE basierend auf Progress
+        # Early Training: Kurze Episodes (schnelles Reset)
+        # Late Training: Längere Episodes (mehr Zeit für Progress)
+        base_episode_length = 10000
+        badge_bonus = badges * 5000  # +5k Steps pro Badge
+        max_episode_length = min(base_episode_length + badge_bonus, 50000)
+
+        done = self.stats['current_episode_steps'] >= max_episode_length
         truncated = False
 
         info = {}
